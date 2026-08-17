@@ -19,6 +19,7 @@ class SnakeEnv:
         self.grid_size = grid_size
         self.cell_size = WINDOW_SIZE // grid_size
         self.render = render
+        self.limit_steps = 200
         if self.render:
             pygame.init()
             self.screen = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE))
@@ -34,7 +35,6 @@ class SnakeEnv:
         self.reward = 0
         self.steps = 0
         self.count_apples = 0
-        return self._get_state()
 
     def _place_food(self):
         random.seed(128)
@@ -46,56 +46,49 @@ class SnakeEnv:
                 return food
 
     def _get_state(self):
+        state = []
         head_x, head_y = self.snake[0]
         food_x, food_y = self.food
         dir_x, dir_y = self.direction
 
         rel_food_x = food_x - head_x
         rel_food_y = food_y - head_y
-        manchet_dist = abs(rel_food_x) + abs(rel_food_y)
         evclid_dist = sqrt(rel_food_x**2 + rel_food_y**2)
+        
+        state.extend([rel_food_x, rel_food_y, evclid_dis])
 
-        directions = [
-            (0, 1),
-            (0, -1),
-            (-1, 0),
-            (1, 0)
+        # Переменные направления головы
+        dir_x, dir_y = self.direction
+
+        # 1. Расстояние ДО СТЕНЫ ВПЕРЕДИ
+        if dir_x == 1:    dist_front = (self.grid_size - 1) - head_x  # ползет вправо
+        elif dir_x == -1: dist_front = head_x                         # ползет влево
+        elif dir_y == 1:  dist_front = (self.grid_size - 1) - head_y  # ползет вниз
+        else:             dist_front = head_y                         # ползет вверх
+
+        # 2. Расстояние ДО СТЕНЫ СЛЕВА (относительно движения змейки)
+        left_x, left_y = -dir_y, dir_x
+        if left_x == 1:    dist_left = (self.grid_size - 1) - head_x
+        elif left_x == -1: dist_left = head_x
+        elif left_y == 1:  dist_left = (self.grid_size - 1) - head_y
+        else:              dist_left = head_y
+
+        # 3. Расстояние ДО СТЕНЫ СПРАВА (относительно движения змейки)
+        right_x, right_y = dir_y, -dir_x
+        if right_x == 1:    dist_right = (self.grid_size - 1) - head_x
+        elif right_x == -1: dist_right = head_x
+        elif right_y == 1:  dist_right = (self.grid_size - 1) - head_y
+        else:               dist_right = head_y
+
+        # Нормализуем, деля на размер сетки
+        wall_distances = [
+            dist_front / self.grid_size,
+            dist_left / self.grid_size,
+            dist_right / self.grid_size
         ]
-        direction_idx = directions.index(self.direction)
 
-        wall_distances = []
-        if dir_x == 1:  # Движение вправо
-            wall_distances += [
-                head_y / (self.grid_size - 1),
-                (self.grid_size - 1 - head_y) / (self.grid_size - 1),
-                (self.grid_size - 1 - head_x) / (self.grid_size - 1)
-            ]
-        elif dir_x == -1:  # Движение влево
-            wall_distances += [
-                head_y / (self.grid_size - 1),
-                (self.grid_size - 1 - head_y) / (self.grid_size - 1),
-                head_x / (self.grid_size - 1)
-            ]
-        elif dir_y == 1:  # Движение вверх
-            wall_distances += [
-                head_x / (self.grid_size - 1),
-                (self.grid_size - 1 - head_x) / (self.grid_size - 1),
-                head_y / (self.grid_size - 1)
-            ]
-        else:  # Движение вниз
-            wall_distances += [
-                head_x / (self.grid_size - 1),
-                (self.grid_size - 1 - head_x) / (self.grid_size - 1),
-                (self.grid_size - 1 - head_y) / (self.grid_size - 1)
-            ]
+        state.extend(wall_distance)
 
-        state = [
-            rel_food_x / self.grid_size,
-            manchet_dist/self.grid_size,
-            evclid_dist/self.grid_size,
-            rel_food_y / self.grid_size,
-            *wall_distances
-        ]
         return np.array(state, dtype=np.float32)
 
     def _next_position(self, x, y, direction):
@@ -135,15 +128,18 @@ class SnakeEnv:
                 return self._get_state(), -10.0, True
 
         self.snake.insert(0, new_head)
+
         self.steps += 1
 
         if new_head == self.food:
             self.food = self._place_food()
             self.count_apples += 1
             self.reward += sqrt(self.count_apples) * 3.5
-        else:
+        elif self.steps <= self.limit_steps:
             self.snake.pop()
-            self.reward += -0.25
+            self.reward -= 0.25
+        else:
+            self.done = True
 
         if self.render:
             self.render_frame()
@@ -170,6 +166,7 @@ class SnakeEnv:
 
         pygame.display.flip()
         pygame.time.wait(50)
+    
 
     def close(self):
         if self.render:
